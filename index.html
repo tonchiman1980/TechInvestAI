@@ -1,0 +1,53 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TechInvest AI</title>
+    
+    <!-- あなたがルートに置く icon.png を iPhoneアイコンとして設定 -->
+    <link rel="apple-touch-icon" href="icon.png">
+    
+    <!-- Android/PWA用設定 -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- iOS アプリ化設定 (ホーム画面から起動した時にブラウザの枠を消す) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TechInvest">
+    <meta name="theme-color" content="#FDFDFF">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            -webkit-overflow-scrolling: touch;
+            background-color: #FDFDFF;
+            overscroll-behavior-y: none;
+            /* iPhoneのホーム画面から起動した際の下部余白対策 */
+            min-height: 100vh;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .safe-area-top {
+            padding-top: env(safe-area-inset-top);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.36.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3"
+  }
+}
+</script>
+</head>
+<body class="antialiased text-slate-900">
+    <div id="root"></div>
+</body>
+</html>
