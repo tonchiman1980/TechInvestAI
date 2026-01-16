@@ -7,7 +7,7 @@
     <title>TechInvest AI</title>
     
     <link rel="apple-touch-icon" href="icon.png">
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/manifest.json">
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -31,6 +31,13 @@
         * {
             -webkit-tap-highlight-color: transparent;
         }
+        @keyframes subtle-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+        .animate-subtle {
+            animation: subtle-bounce 3s ease-in-out infinite;
+        }
     </style>
 <script type="importmap">
 {
@@ -46,7 +53,7 @@
 }
 </script>
 </head>
-<body class="antialiased">
+<body class="antialiased text-slate-900">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 </body>
