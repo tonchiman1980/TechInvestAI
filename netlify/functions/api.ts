@@ -3,44 +3,41 @@ import { GoogleGenAI } from "@google/genai";
 
 export const handler = async (event: any, context: any) => {
   const apiKey = process.env.API_KEY;
+  
   if (!apiKey) {
-    console.error("API_KEY is missing in Netlify environment variables.");
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Server Configuration Error: API_KEY is missing." }),
+      body: JSON.stringify({ 
+        error: "Config Error", 
+        message: "Netlifyの環境変数に API_KEY が設定されていません。" 
+      }),
     };
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
     
-    // 検索グラウンディングを有効にするため、スキーマ指定ではなくプロンプトでJSON構造を指示
     const prompt = `
-      あなたは最先端テック分野とグローバル株式市場の専門アナリストです。
-      「今日（現在時点）」で投資家が絶対に知っておくべき重要なテックニュースを3〜5件提供してください。
-
-      【重要】出力は必ず以下のJSON形式のみを返してください。説明文や装飾（\`\`\`jsonなど）は不要です。
+      あなたは世界トップクラスのテック専門投資家です。
+      Google検索を使用して、半導体、AI、ロボティクス、量子、EVなどの「過去72時間以内」の最新ニュースを3〜5件ピックアップしてください。
       
+      各ニュースについて以下のJSON形式で出力してください：
       {
         "news": [
           {
             "index": 1,
-            "topic": "トピック名",
-            "title": "ニュースタイトル",
+            "topic": "分野 (AI, 半導体など)",
+            "title": "投資家が注目すべきタイトル",
             "importance": 5,
-            "summary": "3行以内の事実要約",
-            "affectedEntities": [
-              { "region": "日本", "entities": ["銘柄名1", "銘柄名2"] },
-              { "region": "米国", "entities": ["銘柄名3"] }
-            ],
-            "whyWatch": "投資家が注目すべき理由と短期・中期・長期の視点",
-            "risks": "考えられるリスクや未確定要素",
-            "category": "カテゴリー名"
+            "technicalSummary": "専門家向けの技術的・経済的影響を3文程度で詳しく要約（ですます調ではなく、硬い口調で）",
+            "simpleSummary": "日常生活に例えた、子供でもわかるやさしい解説",
+            "whyWatch": "今後の投資判断における最重要ポイント",
+            "risks": "懸念されるリスクや技術的課題",
+            "category": "カテゴリ"
           }
         ]
       }
-
-      対象分野: AI, 半導体, クラウド, EV, 量子コンピュータ, Web3, ロボティクス
+      必ず日本語で、JSONのみを返してください。
     `;
 
     const response = await ai.models.generateContent({
@@ -48,54 +45,41 @@ export const handler = async (event: any, context: any) => {
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        // googleSearch使用時はresponseMimeTypeを避けるのが安定動作のコツです
+        temperature: 0.7,
       },
     });
 
-    const rawText = response.text || "";
-    // JSON部分のみを抽出（前後に文字が入る可能性を考慮）
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    const cleanedJson = jsonMatch ? jsonMatch[0] : rawText;
+    const text = response.text || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("AIの応答からJSONを抽出できませんでした。");
     
-    let newsData;
-    try {
-      newsData = JSON.parse(cleanedJson);
-    } catch (parseError) {
-      console.error("JSON Parse Error. Raw text:", rawText);
-      throw new Error("AIからのレスポンスを解析できませんでした。");
-    }
+    const data = JSON.parse(jsonMatch[0]);
 
-    // Google Searchの引用元（グラウンディング）を抽出
+    // ソースURLの抽出
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const sourceUrls = groundingChunks
-      .filter((chunk: any) => chunk.web)
-      .map((chunk: any) => ({
-        title: chunk.web.title,
-        uri: chunk.web.uri
-      }));
+    const webSources = groundingChunks
+      .filter((c: any) => c.web)
+      .map((c: any) => ({ title: c.web.title, uri: c.web.uri }));
 
-    // ID付与とソースの紐付け
-    const enrichedNews = newsData.news.map((item: any, idx: number) => ({
+    const enrichedNews = (data.news || []).map((item: any, idx: number) => ({
       ...item,
       id: `news-${Date.now()}-${idx}`,
-      sourceUrls: sourceUrls.length > 0 ? sourceUrls.slice(idx * 2, (idx * 2) + 2) : []
+      sourceUrls: webSources.slice(idx * 2, (idx * 2) + 2)
     }));
 
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ news: enrichedNews }),
     };
   } catch (error: any) {
-    console.error("Backend Error:", error);
+    console.error("API Error:", error);
     return {
       statusCode: 500,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
-        error: "Internal Server Error", 
-        message: error.message 
+        error: "Server Error", 
+        message: error.message || "予期せぬエラーが発生しました。" 
       }),
     };
   }
