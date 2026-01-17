@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ExternalLink, Star, BookOpen, GraduationCap, Settings, Search, Zap } from 'lucide-react';
+import { RefreshCw, ExternalLink, Star, BookOpen, GraduationCap, Settings, Search, Zap, AlertCircle } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { TechNewsItem } from './types';
 
@@ -12,66 +12,69 @@ const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
 
   const ai = new GoogleGenAI({ apiKey });
   
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: "半導体、AI、ロボティクス、EV、量子コンピュータに関する最新の重要投資ニュースを3〜5件探して分析してください。各ニュースには詳細な解説をつけてください。",
-    config: {
-      tools: [{ googleSearch: {} }],
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          news: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                index: { type: Type.NUMBER },
-                topic: { type: Type.STRING },
-                title: { type: Type.STRING },
-                importance: { type: Type.NUMBER },
-                technicalSummary: { type: Type.STRING },
-                simpleSummary: { type: Type.STRING },
-                whyWatch: { type: Type.STRING },
-                risks: { type: Type.STRING },
-                category: { type: Type.STRING }
-              },
-              required: ["index", "topic", "title", "importance", "technicalSummary", "simpleSummary", "whyWatch", "risks"]
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: "半導体、AI、ロボティクス、EV、量子コンピュータに関する最新の重要投資ニュースを3〜5件探して分析してください。各項目の内容は、必ず日本語で出力してください。",
+      config: {
+        systemInstruction: "あなたはプロの投資アナリストです。最新のテックニュースを深く分析し、投資家にとって有益な情報をすべて日本語で提供してください。専門用語は適切に使いつつ、初心者にも分かりやすい解説を心がけてください。",
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            news: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  index: { type: Type.NUMBER },
+                  topic: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                  importance: { type: Type.NUMBER },
+                  technicalSummary: { type: Type.STRING },
+                  simpleSummary: { type: Type.STRING },
+                  whyWatch: { type: Type.STRING },
+                  risks: { type: Type.STRING },
+                  category: { type: Type.STRING }
+                },
+                required: ["index", "topic", "title", "importance", "technicalSummary", "simpleSummary", "whyWatch", "risks"]
+              }
             }
           }
         }
-      }
-    },
-  });
+      },
+    });
 
-  const jsonStr = response.text;
-  if (!jsonStr) throw new Error("AIから有効なデータが返されませんでした。");
-  
-  const data = JSON.parse(jsonStr);
+    const jsonStr = response.text;
+    if (!jsonStr) throw new Error("AIから返答がありませんでした。");
+    const data = JSON.parse(jsonStr);
 
-  // Google SearchのURLを抽出
-  const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  const urls = groundingChunks
-    .filter((chunk: any) => chunk.web)
-    .map((chunk: any) => ({
-      title: chunk.web.title || "参考ソース",
-      uri: chunk.web.uri
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const urls = groundingChunks
+      .filter((chunk: any) => chunk.web)
+      .map((chunk: any) => ({
+        title: chunk.web.title || "参考ソース",
+        uri: chunk.web.uri
+      }));
+
+    return (data.news || []).map((n: any, i: number) => ({
+      ...n,
+      id: `n-${Date.now()}-${i}`,
+      sourceUrls: urls
     }));
-
-  return (data.news || []).map((n: any, i: number) => ({
-    ...n,
-    id: `n-${Date.now()}-${i}`,
-    sourceUrls: urls.length > 0 ? urls : []
-  }));
+  } catch (err: any) {
+    if (err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED')) {
+      throw new Error("APIの利用制限を超えました。1分ほど待ってから再度お試しください。無料版のGoogle検索機能には1日の上限があります。");
+    }
+    throw err;
+  }
 };
 
 const fetchTechNews = async (): Promise<TechNewsItem[]> => {
   try {
     const response = await fetch('/.netlify/functions/api');
-    if (!response.ok) {
-      // サーバーサイドが未設定・エラーの場合はフロントエンドで直接取得を試みる
-      return await fetchDirectlyFromGemini();
-    }
+    if (!response.ok) return await fetchDirectlyFromGemini();
     const data = await response.json();
     return data.news || [];
   } catch (e) {
@@ -105,7 +108,7 @@ const NewsCard = ({ item }: { item: TechNewsItem }) => (
       <div className="bg-slate-50/60 rounded-[1.8rem] p-5 border border-slate-100">
         <div className="flex items-center gap-1.5 mb-2.5 opacity-40">
           <GraduationCap className="w-3.5 h-3.5" />
-          <h4 className="text-[10px] font-black uppercase tracking-[0.15em]">Tech Briefing</h4>
+          <h4 className="text-[10px] font-black uppercase tracking-[0.15em]">Technical Analysis</h4>
         </div>
         <p className="text-[14px] text-slate-600 leading-relaxed font-semibold italic">{item.technicalSummary}</p>
       </div>
@@ -133,10 +136,10 @@ const NewsCard = ({ item }: { item: TechNewsItem }) => (
     {item.sourceUrls && item.sourceUrls.length > 0 && (
       <div className="mt-7 pt-7 border-t border-slate-50 overflow-x-auto no-scrollbar">
         <div className="flex gap-2">
-          {item.sourceUrls.map((url, i) => (
+          {item.sourceUrls.slice(0, 3).map((url, i) => (
             <a key={i} href={url.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 text-[10px] font-black text-slate-400 bg-white px-4 py-2.5 rounded-2xl border border-slate-100 whitespace-nowrap active:bg-slate-50 transition-colors shadow-sm">
               <ExternalLink className="w-3 h-3" />
-              {url.title?.substring(0, 18) || "ソースを表示"}...
+              ソース {i + 1}
             </a>
           ))}
         </div>
@@ -156,12 +159,11 @@ export default function App() {
     setErrorMsg(null);
     try {
       const data = await fetchTechNews();
-      if (data.length === 0) throw new Error("ニュースが見つかりませんでした。");
       setNews(data);
       setLastUpdated(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
       console.error(e);
-      setErrorMsg(e.message || "通信エラーが発生しました。");
+      setErrorMsg(e.message || "エラーが発生しました。");
     } finally {
       setLoading(false);
     }
@@ -170,69 +172,48 @@ export default function App() {
   useEffect(() => { loadData(); }, [loadData]);
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-[#FDFDFF] flex flex-col font-sans select-none overflow-x-hidden">
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-3xl border-b border-slate-50/50 px-7 pt-16 pb-7 flex justify-between items-end safe-area-top">
+    <div className="max-w-md mx-auto min-h-screen bg-[#FDFDFF] flex flex-col font-sans select-none">
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-3xl border-b border-slate-50/50 px-7 pt-16 pb-7 flex justify-between items-end safe-area-top">
         <div>
           <h1 className="text-[28px] font-[1000] text-slate-900 tracking-tighter leading-none mb-1.5 italic">TechInvest <span className="text-blue-600">AI</span></h1>
           <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Alpha Insight Engine</p>
         </div>
-        <button 
-          onClick={loadData} 
-          disabled={loading} 
-          className={`w-14 h-14 flex items-center justify-center bg-slate-900 rounded-[1.6rem] active:scale-90 transition-all shadow-2xl shadow-slate-200 ${loading ? 'opacity-50' : ''}`}
-        >
+        <button onClick={loadData} disabled={loading} className="w-14 h-14 flex items-center justify-center bg-slate-900 rounded-[1.6rem] active:scale-90 transition-all shadow-xl">
           <RefreshCw className={`w-6 h-6 text-white ${loading ? 'animate-spin' : ''}`} />
         </button>
       </header>
 
       <main className="flex-1 px-6 py-8">
-        <div className="flex items-center justify-between mb-10 px-2">
-          <div className="flex flex-col gap-1.5">
-            <h2 className="text-[11px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-blue-600" /> Real-time Intel
-            </h2>
-            <div className="w-12 h-0.5 bg-blue-600 rounded-full"></div>
-          </div>
-          <span className="text-[10px] font-black text-slate-400 bg-slate-100/50 px-4 py-2 rounded-full uppercase tracking-tighter">
-            {loading ? 'Analyzing...' : `${lastUpdated} Updated`}
-          </span>
-        </div>
-
         {errorMsg ? (
-          <div className="py-20 text-center px-8 bg-white rounded-[3.5rem] shadow-xl border border-red-50">
+          <div className="py-20 text-center px-8 bg-white rounded-[3.5rem] shadow-xl border border-red-50 mx-2">
             <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-8 animate-subtle">
-              <Settings className="w-10 h-10 text-red-500" />
+              <AlertCircle className="w-10 h-10 text-red-500" />
             </div>
-            <h3 className="text-xl font-black text-red-950 mb-3 uppercase">System Alert</h3>
-            <p className="text-[13px] text-red-900/50 mb-10 leading-relaxed font-bold">{errorMsg}</p>
-            <button 
-              onClick={loadData} 
-              className="w-full py-5 bg-red-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
-            >
-              再試行
+            <h3 className="text-xl font-black text-red-950 mb-3 uppercase tracking-wider">System Alert</h3>
+            <p className="text-[14px] text-red-900/60 mb-10 leading-relaxed font-bold">{errorMsg}</p>
+            <button onClick={loadData} className="w-full py-5 bg-red-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+              1分待ってから再試行
             </button>
+            <p className="mt-6 text-[11px] text-slate-400 font-bold">※無料枠のGoogle検索制限の可能性があります</p>
           </div>
         ) : loading ? (
           <div className="flex flex-col items-center justify-center py-48">
-            <div className="relative mb-10">
-              <div className="w-24 h-24 border-[8px] border-slate-50 border-t-blue-600 rounded-full animate-spin"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-3 h-3 bg-blue-600 rounded-full animate-ping"></div>
-              </div>
-            </div>
-            <p className="text-[11px] font-black text-slate-300 uppercase tracking-[0.5em] animate-pulse">Deep Market Scanning...</p>
+            <div className="w-24 h-24 border-[8px] border-slate-50 border-t-blue-600 rounded-full animate-spin mb-10"></div>
+            <p className="text-[11px] font-black text-slate-300 uppercase tracking-[0.5em] animate-pulse text-center">Scanning Tech Markets...</p>
           </div>
         ) : (
           <div className="pb-28">
-            {news.map(item => <NewsCard key={item.id} item={item} />)}
-            <div className="text-center py-10 opacity-10">
-              <p className="text-[9px] font-black uppercase tracking-[0.6em]">Alpha Intelligence v4.4</p>
+            <div className="flex items-center justify-between mb-10 px-2 opacity-50">
+               <h2 className="text-[11px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5 text-blue-600" /> Intel Feed
+               </h2>
+               <span className="text-[10px] font-black text-slate-400 tracking-tighter">{lastUpdated} Updated</span>
             </div>
+            {news.map(item => <NewsCard key={item.id} item={item} />)}
           </div>
         )}
       </main>
-      
-      <div className="fixed bottom-0 left-0 right-0 h-12 bg-white/40 backdrop-blur-2xl border-t border-slate-100/30 pointer-events-none"></div>
+      <div className="fixed bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
     </div>
   );
 }
