@@ -1,49 +1,80 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, ExternalLink, Star, BookOpen, GraduationCap, Settings, Search, Zap } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { TechNewsItem } from './types';
 
-// 直接AIを呼び出す関数（プレビュー用/フォールバック用）
 const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const prompt = `
-    あなたはシニア投資家です。Google検索を使って、半導体、AI、ロボ、EVに関する最新(3日以内)の重要ニュースを3〜5件探して。
-    JSONのみで回答して：
-    { "news": [{ "index": 1, "topic": "分野", "title": "タイトル", "importance": 5, "technicalSummary": "詳細要約", "simpleSummary": "やさしい解説", "whyWatch": "注目点", "risks": "リスク", "category": "カテゴリ" }] }
-  `;
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") {
+    throw new Error("APIキーが設定されていません。Netlifyの環境変数を確認してください。");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: { tools: [{ googleSearch: {} }], temperature: 0.7 },
+    contents: "半導体、AI、ロボティクス、EV、量子コンピュータに関する最新の重要投資ニュースを3〜5件探して分析してください。各ニュースには詳細な解説をつけてください。",
+    config: {
+      tools: [{ googleSearch: {} }],
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          news: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                index: { type: Type.NUMBER },
+                topic: { type: Type.STRING },
+                title: { type: Type.STRING },
+                importance: { type: Type.NUMBER },
+                technicalSummary: { type: Type.STRING },
+                simpleSummary: { type: Type.STRING },
+                whyWatch: { type: Type.STRING },
+                risks: { type: Type.STRING },
+                category: { type: Type.STRING }
+              },
+              required: ["index", "topic", "title", "importance", "technicalSummary", "simpleSummary", "whyWatch", "risks"]
+            }
+          }
+        }
+      }
+    },
   });
-  const text = response.text || "";
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("AIから正しくデータが届きませんでした。");
-  const data = JSON.parse(jsonMatch[0]);
-  return (data.news || []).map((n: any, i: number) => ({ ...n, id: `n-${Date.now()}-${i}`, sourceUrls: [] }));
+
+  const jsonStr = response.text;
+  if (!jsonStr) throw new Error("AIから有効なデータが返されませんでした。");
+  
+  const data = JSON.parse(jsonStr);
+
+  // Google SearchのURLを抽出
+  const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  const urls = groundingChunks
+    .filter((chunk: any) => chunk.web)
+    .map((chunk: any) => ({
+      title: chunk.web.title || "参考ソース",
+      uri: chunk.web.uri
+    }));
+
+  return (data.news || []).map((n: any, i: number) => ({
+    ...n,
+    id: `n-${Date.now()}-${i}`,
+    sourceUrls: urls.length > 0 ? urls : []
+  }));
 };
 
 const fetchTechNews = async (): Promise<TechNewsItem[]> => {
   try {
-    // 1. まずはセキュアなバックエンド（Netlify Functions）を試す
     const response = await fetch('/.netlify/functions/api');
-    
-    // バックエンドが存在しない場合（プレビュー環境など）は404になるので、その場合は直接AIを叩く
     if (!response.ok) {
-      if (response.status === 404) {
-        console.warn("Backend not found, falling back to direct API call...");
-        return await fetchDirectlyFromGemini();
-      }
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || "ニュースの取得に失敗しました。");
+      // サーバーサイドが未設定・エラーの場合はフロントエンドで直接取得を試みる
+      return await fetchDirectlyFromGemini();
     }
-    
     const data = await response.json();
     return data.news || [];
   } catch (e) {
-    console.error("Fetch Error:", e);
-    // ネットワークエラーなどの場合も直接呼び出しを試みる
     return await fetchDirectlyFromGemini();
   }
 };
@@ -105,7 +136,7 @@ const NewsCard = ({ item }: { item: TechNewsItem }) => (
           {item.sourceUrls.map((url, i) => (
             <a key={i} href={url.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 text-[10px] font-black text-slate-400 bg-white px-4 py-2.5 rounded-2xl border border-slate-100 whitespace-nowrap active:bg-slate-50 transition-colors shadow-sm">
               <ExternalLink className="w-3 h-3" />
-              {url.title?.substring(0, 18) || "詳細ソース"}...
+              {url.title?.substring(0, 18) || "ソースを表示"}...
             </a>
           ))}
         </div>
@@ -125,11 +156,12 @@ export default function App() {
     setErrorMsg(null);
     try {
       const data = await fetchTechNews();
+      if (data.length === 0) throw new Error("ニュースが見つかりませんでした。");
       setNews(data);
       setLastUpdated(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
       console.error(e);
-      setErrorMsg(e.message || "エラーが発生しました。");
+      setErrorMsg(e.message || "通信エラーが発生しました。");
     } finally {
       setLoading(false);
     }
@@ -194,7 +226,7 @@ export default function App() {
           <div className="pb-28">
             {news.map(item => <NewsCard key={item.id} item={item} />)}
             <div className="text-center py-10 opacity-10">
-              <p className="text-[9px] font-black uppercase tracking-[0.6em]">Alpha Intelligence v4.1</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.6em]">Alpha Intelligence v4.4</p>
             </div>
           </div>
         )}
