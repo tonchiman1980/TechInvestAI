@@ -9,8 +9,9 @@ export const handler = async (event: any, context: any) => {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "投資家向けテックニュースを3〜5件探して分析してください。",
+      contents: "投資家向けテックニュースを3〜5件探して分析してください。必ず日本語で出力してください。",
       config: {
+        systemInstruction: "あなたはプロの投資アナリストです。最新のテックニュースを深く分析し、投資家にとって有益な情報をすべて日本語で提供してください。",
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
