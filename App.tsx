@@ -1,23 +1,27 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, ExternalLink, Star, BookOpen, GraduationCap, Settings, Search, Zap, AlertCircle } from 'lucide-react';
+import { RefreshCw, ExternalLink, Star, BookOpen, GraduationCap, Settings, Search, Zap, AlertCircle, Info } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { TechNewsItem } from './types';
 
+// Fix: Use the recommended model for complex reasoning and follow initialization guidelines
 const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
   const apiKey = process.env.API_KEY;
+  
   if (!apiKey || apiKey === "undefined") {
-    throw new Error("APIキーが設定されていません。Netlifyの環境変数を確認してください。");
+    console.error("DEBUG: API_KEY is missing in the frontend build.");
+    throw new Error("APIキーがアプリに紐付いていません。NetlifyでEnvironment variablesを設定した後、一度『Clear cache and deploy site』を実行してください。");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  // Fix: Create a new instance right before the call to ensure up-to-date config
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: "半導体、AI、ロボティクス、EV、量子コンピュータに関する最新の重要投資ニュースを3〜5件探して分析してください。各項目の内容は、必ず日本語で出力してください。",
+      model: "gemini-3-pro-preview", // Complex analysis task
+      contents: "半導体、AI、ロボティクス、EV、量子コンピュータに関する最新の重要投資ニュースを3〜5件探して分析してください。必ず日本語で出力してください。",
       config: {
-        systemInstruction: "あなたはプロの投資アナリストです。最新のテックニュースを深く分析し、投資家にとって有益な情報をすべて日本語で提供してください。専門用語は適切に使いつつ、初心者にも分かりやすい解説を心がけてください。",
+        systemInstruction: "あなたはプロの投資アナリストです。最新のテックニュースを深く分析し、投資家にとって有益な情報をすべて日本語で提供してください。専門用語は適切に使いつつ、初心者にも分かりやすい解説を心がけてください。回答は必ず日本語で行ってください。",
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
@@ -46,10 +50,12 @@ const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
       },
     });
 
-    const jsonStr = response.text;
-    if (!jsonStr) throw new Error("AIから返答がありませんでした。");
+    // Fix: Clean markdown code blocks from the response text if present
+    const jsonStr = response.text.replace(/```json\n?|```/g, '').trim();
+    if (!jsonStr) throw new Error("AIからの応答が空でした。");
     const data = JSON.parse(jsonStr);
 
+    // Fix: Correctly extract URLs from grounding chunks
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const urls = groundingChunks
       .filter((chunk: any) => chunk.web)
@@ -61,11 +67,12 @@ const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
     return (data.news || []).map((n: any, i: number) => ({
       ...n,
       id: `n-${Date.now()}-${i}`,
-      sourceUrls: urls
+      sourceUrls: urls,
+      affectedEntities: n.affectedEntities || [] // Ensure missing required properties are handled
     }));
   } catch (err: any) {
     if (err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED')) {
-      throw new Error("APIの利用制限を超えました。1分ほど待ってから再度お試しください。無料版のGoogle検索機能には1日の上限があります。");
+      throw new Error("Google検索機能の制限に達しました。使用率が0%に見えても、無料枠の検索機能には非常に厳しい回数制限があります。1分ほど待つか、しばらく時間をおいてください。");
     }
     throw err;
   }
@@ -74,15 +81,20 @@ const fetchDirectlyFromGemini = async (): Promise<TechNewsItem[]> => {
 const fetchTechNews = async (): Promise<TechNewsItem[]> => {
   try {
     const response = await fetch('/.netlify/functions/api');
-    if (!response.ok) return await fetchDirectlyFromGemini();
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || "Function Error");
+    }
     const data = await response.json();
     return data.news || [];
-  } catch (e) {
+  } catch (e: any) {
+    console.warn("Function failed, falling back to direct call:", e.message);
     return await fetchDirectlyFromGemini();
   }
 };
 
-const NewsCard = ({ item }: { item: TechNewsItem }) => (
+// Fix: Use React.FC to allow the 'key' prop when mapping over components
+const NewsCard: React.FC<{ item: TechNewsItem }> = ({ item }) => (
   <div className="bg-white rounded-[2.8rem] p-7 mb-10 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.06)] border border-slate-100 relative active:scale-[0.97] transition-all duration-300">
     <div className="flex items-center justify-between mb-5">
       <div className="flex items-center gap-2.5">
@@ -163,7 +175,7 @@ export default function App() {
       setLastUpdated(new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
       console.error(e);
-      setErrorMsg(e.message || "エラーが発生しました。");
+      setErrorMsg(e.message || "通信エラーが発生しました。");
     } finally {
       setLoading(false);
     }
@@ -185,16 +197,28 @@ export default function App() {
 
       <main className="flex-1 px-6 py-8">
         {errorMsg ? (
-          <div className="py-20 text-center px-8 bg-white rounded-[3.5rem] shadow-xl border border-red-50 mx-2">
+          <div className="py-12 text-center px-8 bg-white rounded-[3.5rem] shadow-xl border border-red-50 mx-2">
             <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-8 animate-subtle">
               <AlertCircle className="w-10 h-10 text-red-500" />
             </div>
             <h3 className="text-xl font-black text-red-950 mb-3 uppercase tracking-wider">System Alert</h3>
-            <p className="text-[14px] text-red-900/60 mb-10 leading-relaxed font-bold">{errorMsg}</p>
-            <button onClick={loadData} className="w-full py-5 bg-red-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
-              1分待ってから再試行
+            <p className="text-[14px] text-red-900/60 mb-8 leading-relaxed font-bold">{errorMsg}</p>
+            
+            <div className="bg-slate-50 rounded-3xl p-5 mb-8 text-left">
+               <div className="flex items-center gap-2 mb-2 text-slate-400">
+                  <Info className="w-4 h-4" />
+                  <span className="text-[10px] font-black uppercase">How to Fix</span>
+               </div>
+               <ul className="text-[12px] text-slate-600 space-y-2 font-semibold">
+                  <li>1. Netlifyの管理画面で <b>API_KEY</b> が正しく設定されているか確認</li>
+                  <li>2. 設定後、<b>Deploys > Trigger deploy > Clear cache and deploy site</b> を実行</li>
+                  <li>3. 1分ほど待ってから下のボタンを押す</li>
+               </ul>
+            </div>
+
+            <button onClick={loadData} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+              再試行する
             </button>
-            <p className="mt-6 text-[11px] text-slate-400 font-bold">※無料枠のGoogle検索制限の可能性があります</p>
           </div>
         ) : loading ? (
           <div className="flex flex-col items-center justify-center py-48">
